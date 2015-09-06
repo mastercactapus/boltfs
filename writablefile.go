@@ -26,7 +26,7 @@ func (f *writableFile) Write(p []byte) (int, error) {
 func (f *writableFile) wipeInode() error {
 	// if failed, delete data
 	return f.fs.db.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket(f.fs.bucket).Bucket([]byte("inodes")).DeleteBucket(f.inode)
+		return tx.Bucket(f.fs.bucket).Bucket([]byte(inodesKey)).DeleteBucket(f.inode)
 	})
 }
 
@@ -56,7 +56,7 @@ func (f *writableFile) Close() error {
 		err = msgpack.Unmarshal(oldData, &oldStat)
 		if err == nil {
 			// attempt to delete old inode stuff
-			tx.Bucket(f.fs.bucket).Bucket([]byte("inodes")).DeleteBucket(oldStat.Inode)
+			tx.Bucket(f.fs.bucket).Bucket([]byte(inodesKey)).DeleteBucket(oldStat.Inode)
 		}
 		return bk.Put([]byte(f.file), data)
 	})

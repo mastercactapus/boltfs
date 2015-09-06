@@ -14,6 +14,10 @@ import (
 )
 
 const blockSize int64 = 32768
+const inodeIndexKey = "inode_index"
+const versionKey = "boltfs_version"
+const fsKey = "fs"
+const inodesKey = "inodes"
 const Version = 1
 
 //TODO: FileSystem and File change to interfaces
@@ -51,11 +55,26 @@ func NewFileSystem(db *bolt.DB, bucket []byte) (FileSystem, error) {
 		if err != nil {
 			return err
 		}
-		_, err = bk.CreateBucketIfNotExists([]byte("fs"))
+		data := bk.Get([]byte(versionKey))
+		if len(data) > 0 {
+			v := binary.LittleEndian.Uint64(data)
+			if v != Version {
+				return fmt.Errorf("existing fs version mismatch %d!=%d", v, Version)
+			}
+		} else {
+			data = make([]byte, 8)
+			binary.LittleEndian.PutUint64(data, uint64(Version))
+			err = bk.Put([]byte(versionKey), data)
+			if err != nil {
+				return err
+			}
+		}
+
+		_, err = bk.CreateBucketIfNotExists([]byte(fsKey))
 		if err != nil {
 			return err
 		}
-		_, err = bk.CreateBucketIfNotExists([]byte("inodes"))
+		_, err = bk.CreateBucketIfNotExists([]byte(inodesKey))
 		if err != nil {
 			return err
 		}
@@ -70,8 +89,7 @@ func (fs *boltFs) nextInode() ([]byte, error) {
 	val := make([]byte, 8)
 	err := fs.db.Update(func(tx *bolt.Tx) error {
 		bk := tx.Bucket(fs.bucket)
-		key := []byte("inode_index")
-		b := bk.Get(key)
+		b := bk.Get([]byte(inodeIndexKey))
 		var index uint64
 		if len(b) == 8 {
 			copy(val, b)
@@ -81,9 +99,17 @@ func (fs *boltFs) nextInode() ([]byte, error) {
 		}
 		index++
 		binary.LittleEndian.PutUint64(b, index)
-		return bk.Put(key, b)
+		err := bk.Put([]byte(inodeIndexKey), b)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Bucket(fs.bucket).Bucket([]byte(inodesKey)).CreateBucket(val)
+		return err
 	})
-	return val, err
+	if err != nil {
+		return nil, err
+	}
+	return val, nil
 }
 func (fs *boltFs) getDirBucket(tx *bolt.Tx, name string) *bolt.Bucket {
 	parts := strings.Split(strings.TrimPrefix(name, "/"), "/")
@@ -91,7 +117,7 @@ func (fs *boltFs) getDirBucket(tx *bolt.Tx, name string) *bolt.Bucket {
 	if bk == nil {
 		return nil
 	}
-	bk = bk.Bucket([]byte("fs"))
+	bk = bk.Bucket([]byte(fsKey))
 	if bk == nil {
 		return nil
 	}
@@ -110,7 +136,7 @@ func (fs *boltFs) mkDirBucket(tx *bolt.Tx, name string) (*bolt.Bucket, error) {
 	if err != nil {
 		return nil, err
 	}
-	bk, err = bk.CreateBucketIfNotExists([]byte("fs"))
+	bk, err = bk.CreateBucketIfNotExists([]byte(fsKey))
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +205,7 @@ func (fs *boltFs) Open(name string) (http.File, error) {
 			tx.Commit()
 			return nil, err
 		}
-		ibk := tx.Bucket(fs.bucket).Bucket([]byte("inodes")).Bucket(rf.stat.Inode)
+		ibk := tx.Bucket(fs.bucket).Bucket([]byte(inodesKey)).Bucket(rf.stat.Inode)
 		rf.br = newBlockReader(ibk, rf.stat.BlockSize, rf.stat.Length)
 	}
 

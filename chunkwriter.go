@@ -12,7 +12,7 @@ type ChunkedWriter struct {
 }
 
 func NewChunkedWriter(w io.Writer, chunkSize int) *ChunkedWriter {
-	return &ChunkedWriter{size: chunkSize, buf: make([]byte, chunkSize)}
+	return &ChunkedWriter{w: w, size: chunkSize, buf: make([]byte, chunkSize)}
 }
 
 func (cw *ChunkedWriter) Flush() error {

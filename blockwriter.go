@@ -22,7 +22,10 @@ func (i *blockWriter) Write(p []byte) (int, error) {
 	blockID := make([]byte, 8)
 	binary.LittleEndian.PutUint64(blockID, i.block)
 	err := i.fs.db.Batch(func(tx *bolt.Tx) error {
-		return tx.Bucket(i.fs.bucket).Bucket([]byte("inodes")).Bucket(i.id).Put(blockID, p)
+		bk := tx.Bucket(i.fs.bucket)
+		bk = bk.Bucket([]byte(inodesKey))
+		bk = bk.Bucket(i.id)
+		return bk.Put(blockID, p)
 	})
 	if err != nil {
 		return 0, err
