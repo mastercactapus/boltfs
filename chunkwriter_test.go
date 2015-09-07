@@ -2,7 +2,7 @@ package boltfs
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
+	. "github.com/smartystreets/goconvey/convey"
 	"io"
 	"testing"
 )
@@ -27,67 +27,66 @@ func (w *writeLogger) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func TestChunkedWriter_Write_Errors(t *testing.T) {
-	wl := newWriteLogger()
-	wl.failAfter = 1
-	w := NewChunkedWriter(wl, 5)
-	n, err := io.WriteString(w, "hello world")
-	assert.Error(t, err)
-	assert.EqualValues(t, 5, n, "written bytes")
-	wl.Reset()
-	wl.failAfter = 2
-	n, err = io.WriteString(w, "hello world")
-	assert.NoError(t, err)
-	assert.EqualValues(t, 11, n, "written bytes")
-
-	n, err = io.WriteString(w, "hello")
-	assert.Error(t, err)
-	assert.EqualValues(t, 0, n, "written bytes")
-
-}
-
 func TestChunkedWriter_Write(t *testing.T) {
-	wl := newWriteLogger()
+	Convey("Should write to underlying stream in chunks", t, func() {
+		wl := newWriteLogger()
 
-	w := NewChunkedWriter(wl, 5)
+		w := NewChunkedWriter(wl, 5)
 
-	io.WriteString(w, "hey")
-	io.WriteString(w, "there")
-	io.WriteString(w, "foo")
-	io.WriteString(w, "bar")
-	io.WriteString(w, "baz")
-	io.WriteString(w, "woahthere")
-	io.WriteString(w, "hey")
+		io.WriteString(w, "hey")
+		io.WriteString(w, "there")
+		io.WriteString(w, "foo")
+		io.WriteString(w, "bar")
+		io.WriteString(w, "baz")
+		io.WriteString(w, "woahthere")
+		io.WriteString(w, "hey")
 
-	expected := []string{"heyth", "erefo", "obarb", "azwoa", "hther"}
-	for i, val := range expected {
-		assert.Equal(t, val, wl.writes[i], "write #%d failed", i+1)
-	}
-	assert.Len(t, wl.writes, 5, "number of write calls")
-	io.WriteString(w, "a")
-	assert.Len(t, wl.writes, 6, "number of write calls")
+		expected := []string{"heyth", "erefo", "obarb", "azwoa", "hther"}
+		So(wl.writes, ShouldResemble, expected)
+		expected = append(expected, "eheya")
+		io.WriteString(w, "a")
+		So(wl.writes, ShouldResemble, expected)
+	})
 
-	assert.Equal(t, "eheya", wl.writes[5], "last write")
+	Convey("Should only consume blockSize chunks in error event", t, func() {
+		wl := newWriteLogger()
+		wl.failAfter = 1
+		w := NewChunkedWriter(wl, 5)
+		n, err := io.WriteString(w, "hello world")
+		So(err, ShouldNotBeNil)
+		So(n, ShouldEqual, 5)
 
+		wl.Reset()
+		wl.failAfter = 2
+		n, err = io.WriteString(w, "hello world")
+		So(err, ShouldBeNil)
+		So(n, ShouldEqual, 11)
+
+		n, err = io.WriteString(w, "hello")
+		So(err, ShouldNotBeNil)
+		So(n, ShouldEqual, 0)
+	})
 }
 
-func TestChunkedWriter_Flush(t *testing.T) {
+func TestChunkedWriter_Close(t *testing.T) {
 	wl := newWriteLogger()
 
 	w := NewChunkedWriter(wl, 5)
 
-	io.WriteString(w, "okay")
-	assert.Len(t, wl.writes, 0, "number of write calls")
-	w.Close()
-	assert.Len(t, wl.writes, 1, "number of write calls")
-	assert.Equal(t, "okay", wl.writes[0], "flushed data")
-	w.Close()
-	assert.Len(t, wl.writes, 1, "number of write calls")
-	assert.Equal(t, "okay", wl.writes[0], "flushed data")
-	n, err := io.WriteString(w, "woot")
-	assert.Error(t, err)
-	assert.EqualValues(t, 0, n, "written bytes when closed")
-	assert.Len(t, wl.writes, 1, "number of write calls")
-	assert.Equal(t, "okay", wl.writes[0], "flushed data")
-
+	Convey("Should flush pending bytes", t, func() {
+		io.WriteString(w, "okay")
+		So(wl.writes, ShouldResemble, []string{})
+		err := w.Close()
+		So(err, ShouldBeNil)
+		So(wl.writes, ShouldResemble, []string{"okay"})
+	})
+	Convey("Should not accept new data after", t, func() {
+		err := w.Close()
+		So(err, ShouldNotBeNil)
+		So(wl.writes, ShouldResemble, []string{"okay"})
+		n, err := io.WriteString(w, "woot")
+		So(n, ShouldEqual, 0)
+		So(err, ShouldNotBeNil)
+		So(wl.writes, ShouldResemble, []string{"okay"})
+	})
 }

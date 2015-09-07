@@ -2,7 +2,8 @@ package boltfs
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
+	. "github.com/smartystreets/goconvey/convey"
+	"io"
 	"testing"
 )
 
@@ -57,31 +58,36 @@ func TestBlockWriter_Write(t *testing.T) {
 	bw := &blockWriter{txFn: fn, path: path}
 
 	tx.Reset()
-	buf := []byte("hello world")
-	n, err := bw.Write(buf)
-	assert.NoError(t, err, "write call")
-	assert.EqualValues(t, 11, n, "data size")
-	assert.EqualValues(t, 1, bw.Blocks(), "number of blocks")
-	assert.EqualValues(t, 11, bw.Written(), "last written size")
-	assert.Equal(t, []byte{0, 0, 0, 0, 0, 0, 0, 0}, tx.id, "first written block ID")
-	assert.Equal(t, "hello world", string(tx.data), "first written value")
-
-	tx.Reset()
-	buf = []byte("okay")
-	n, err = bw.Write(buf)
-	assert.NoError(t, err, "write call")
-	assert.EqualValues(t, 4, n, "data size")
-	assert.EqualValues(t, 2, bw.Blocks(), "number of blocks")
-	assert.EqualValues(t, 15, bw.Written(), "last written size")
-	assert.Equal(t, []byte{1, 0, 0, 0, 0, 0, 0, 0}, tx.id, "second written block ID")
-	assert.Equal(t, "okay", string(tx.data), "second written value")
+	Convey("Should write data to the correct block", t, func() {
+		tx.Reset()
+		n, err := io.WriteString(bw, "hello world")
+		So(err, ShouldBeNil)
+		So(n, ShouldEqual, 11)
+		So(bw.Blocks(), ShouldEqual, 1)
+		So(bw.Written(), ShouldEqual, 11)
+		So(tx.id, ShouldResemble, []byte{0, 0, 0, 0, 0, 0, 0, 0})
+		So(string(tx.data), ShouldEqual, "hello world")
+		So(tx.path, ShouldResemble, path)
+	})
+	Convey("Should increment block and written count", t, func() {
+		tx.Reset()
+		n, err := io.WriteString(bw, "okay")
+		So(err, ShouldBeNil)
+		So(n, ShouldEqual, 4)
+		So(bw.Blocks(), ShouldEqual, 2)
+		So(bw.Written(), ShouldEqual, 15)
+		So(tx.id, ShouldResemble, []byte{1, 0, 0, 0, 0, 0, 0, 0})
+		So(string(tx.data), ShouldEqual, "okay")
+	})
 
 	tx.Reset()
 	fn = func(fn func(Transaction) error) error {
 		return fmt.Errorf("fail for test")
 	}
 	bw = &blockWriter{txFn: fn, path: path}
-	n, err = bw.Write(buf)
-	assert.EqualValues(t, 0, n, "written data on error")
-	assert.Error(t, err)
+	Convey("Should return no data written on error", t, func() {
+		n, err := bw.Write([]byte("foo"))
+		So(err, ShouldNotBeNil)
+		So(n, ShouldEqual, 0)
+	})
 }

@@ -2,8 +2,9 @@ package boltfs
 
 import (
 	"encoding/binary"
-	"github.com/stretchr/testify/assert"
+	. "github.com/smartystreets/goconvey/convey"
 	"io"
+	"strings"
 	"testing"
 )
 
@@ -41,66 +42,71 @@ func (c *mockCursor) Seek(k []byte) ([]byte, []byte) {
 func TestBlockReader_Seek(t *testing.T) {
 	c := &mockCursor{data: []string{"apple", "orang", "foobr", "okay"}}
 	br := newBlockReader(c, 5, 19)
-	br.Seek(2, 0)
 	buf := make([]byte, 3)
-	br.Read(buf)
-	assert.Equal(t, "ple", string(buf))
-
-	br.Seek(-5, 1)
-	br.Read(buf)
-	assert.Equal(t, "app", string(buf))
-
-	br.Seek(-3, 2)
-	br.Read(buf)
-	assert.Equal(t, "kay", string(buf))
-
+	Convey("Should seek from start when whence is '0'", t, func() {
+		br.Seek(2, 0)
+		br.Read(buf)
+		So(string(buf), ShouldEqual, "ple")
+	})
+	Convey("Should seek from current pos when whence is '1'", t, func() {
+		br.Seek(-5, 1)
+		br.Read(buf)
+		So(string(buf), ShouldEqual, "app")
+	})
+	Convey("Should seek from end when whence is '2'", t, func() {
+		br.Seek(-3, 2)
+		br.Read(buf)
+		So(string(buf), ShouldEqual, "kay")
+	})
 	br.Seek(0, 0)
-	n, err := br.Seek(2, 3)
-	assert.EqualValues(t, 0, n, "position after invalid seek")
-	assert.Error(t, err)
-
-	n, err = br.Seek(-1, 0) //can't seek before 0
-	assert.EqualValues(t, 0, n, "position after invalid seek")
-	assert.Error(t, err)
-
+	Convey("Should refuse to seek with invalid whence", t, func() {
+		n, err := br.Seek(0, 3)
+		So(n, ShouldEqual, 0)
+		So(err, ShouldNotBeNil)
+	})
+	Convey("Should refuse to seek past end of file", t, func() {
+		n, err := br.Seek(1, 2)
+		So(n, ShouldEqual, 0)
+		So(err, ShouldNotBeNil)
+	})
+	Convey("Should refuse to seek past beginning file", t, func() {
+		n, err := br.Seek(0, -2)
+		So(n, ShouldEqual, 0)
+		So(err, ShouldNotBeNil)
+	})
 }
 
 func TestBlockReader_Read(t *testing.T) {
-	c := &mockCursor{data: []string{"apple", "orang", "foobr", "okay"}}
+	data := []string{"apple", "orang", "foobr", "okay"}
+	dataStr := strings.Join(data, "")
+	c := &mockCursor{data: data}
 	br := newBlockReader(c, 5, 19)
 
 	buf := make([]byte, 19)
-	n, err := br.Read(buf)
-	if n != 19 {
-		t.Errorf("did not read all bytes (got %d of %d)", n, 19)
-	}
-	if err != io.EOF {
-		t.Error("should have returned EOF on EOF")
-	}
-
-	n, err = br.Read(buf)
-	if n != 0 {
-		t.Error("should have stayed at EOF")
-	}
-	if err != io.EOF {
-		t.Error("shoudl have continued to return EOF")
-	}
+	Convey("Should always fill the buffer if possible", t, func() {
+		n, _ := br.Read(buf)
+		So(n, ShouldEqual, len(dataStr))
+		So(string(buf), ShouldEqual, dataStr)
+	})
+	Convey("Should return EOF when empty", t, func() {
+		n, err := br.Read(buf)
+		So(n, ShouldEqual, 0)
+		So(err, ShouldEqual, io.EOF)
+	})
 
 	br.Seek(0, 0)
-
 	buf = make([]byte, 15)
-	n, err = br.Read(buf)
-	if string(buf) != "appleorangfoobr" || n != 15 {
-		t.Error("did not read expected data")
-	}
-	if err != nil {
-		t.Error("returned error, when there shouldn't be")
-	}
-	n, err = br.Read(buf)
-	if n != 4 || string(buf[:4]) != "okay" {
-		t.Error("did not finish properly")
-	}
-	if err != io.EOF {
-		t.Error("did not return EOF")
-	}
+
+	Convey("Should read partial data", t, func() {
+		n, err := br.Read(buf)
+		So(n, ShouldEqual, 15)
+		So(string(buf), ShouldEqual, dataStr[:15])
+		So(err, ShouldBeNil)
+	})
+	Convey("Should read into a bigger buffer", t, func() {
+		n, err := br.Read(buf)
+		So(n, ShouldEqual, 4)
+		So(err, ShouldEqual, io.EOF)
+		So(string(buf[:4]), ShouldEqual, dataStr[len(dataStr)-4:])
+	})
 }
