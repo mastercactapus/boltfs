@@ -1,6 +1,7 @@
 package boltfs
 
 import (
+	"fmt"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )
@@ -75,4 +76,12 @@ func TestBlockWriter_Write(t *testing.T) {
 	assert.Equal(t, []byte{1, 0, 0, 0, 0, 0, 0, 0}, tx.id, "second written block ID")
 	assert.Equal(t, "okay", string(tx.data), "second written value")
 
+	tx.Reset()
+	fn = func(fn func(Transaction) error) error {
+		return fmt.Errorf("fail for test")
+	}
+	bw = &blockWriter{txFn: fn, path: path}
+	n, err = bw.Write(buf)
+	assert.EqualValues(t, 0, n, "written data on error")
+	assert.Error(t, err)
 }

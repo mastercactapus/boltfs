@@ -2,6 +2,7 @@ package boltfs
 
 import (
 	"encoding/binary"
+	"github.com/stretchr/testify/assert"
 	"io"
 	"testing"
 )
@@ -43,19 +44,24 @@ func TestBlockReader_Seek(t *testing.T) {
 	br.Seek(2, 0)
 	buf := make([]byte, 3)
 	br.Read(buf)
-	if string(buf) != "ple" {
-		t.Error("seek did not follow begining offset")
-	}
+	assert.Equal(t, "ple", string(buf))
+
 	br.Seek(-5, 1)
 	br.Read(buf)
-	if string(buf) != "app" {
-		t.Error("seek did not follow relative offset")
-	}
+	assert.Equal(t, "app", string(buf))
+
 	br.Seek(-3, 2)
 	br.Read(buf)
-	if string(buf) != "kay" {
-		t.Error("seek did not follow end offset")
-	}
+	assert.Equal(t, "kay", string(buf))
+
+	br.Seek(0, 0)
+	n, err := br.Seek(2, 3)
+	assert.EqualValues(t, 0, n, "position after invalid seek")
+	assert.Error(t, err)
+
+	n, err = br.Seek(-1, 0) //can't seek before 0
+	assert.EqualValues(t, 0, n, "position after invalid seek")
+	assert.Error(t, err)
 
 }
 
