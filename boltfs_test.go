@@ -35,7 +35,7 @@ func TestBoltFS(t *testing.T) {
 
 	rc, err := fs.Open("foo")
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 	data, err := ioutil.ReadAll(rc)
 	if err != nil {

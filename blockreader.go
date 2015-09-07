@@ -3,20 +3,24 @@ package boltfs
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/boltdb/bolt"
 	"io"
 )
 
+type cursor interface {
+	First() ([]byte, []byte)
+	Next() ([]byte, []byte)
+	Seek([]byte) ([]byte, []byte)
+}
+
 type blockReader struct {
-	c         *bolt.Cursor
+	c         cursor
 	blockSize int64
 	length    int64
 	pos       int64
 	cblock    []byte
 }
 
-func newBlockReader(bk *bolt.Bucket, blockSize, length int64) *blockReader {
-	c := bk.Cursor()
+func newBlockReader(c cursor, blockSize, length int64) *blockReader {
 	_, fblock := c.First()
 	return &blockReader{c: c, blockSize: blockSize, length: length, cblock: fblock}
 }
@@ -58,9 +62,17 @@ func (br *blockReader) Read(p []byte) (int, error) {
 		br.pos += int64(plen)
 		return plen, nil
 	}
-	copy(p, br.cblock)
-	br.pos += int64(clen)
-	p = p[clen:]
-	_, br.cblock = br.c.Next()
-	return clen, nil
+	var read int
+	for br.cblock != nil && len(p) >= clen {
+		copy(p, br.cblock)
+		br.pos += int64(clen)
+		p = p[clen:]
+		read += clen
+		_, br.cblock = br.c.Next()
+		clen = len(br.cblock)
+	}
+	if br.pos == br.length {
+		return read, io.EOF
+	}
+	return read, nil
 }

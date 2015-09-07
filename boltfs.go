@@ -122,8 +122,11 @@ func (fs *boltFs) getDirBucket(tx *bolt.Tx, name string) *bolt.Bucket {
 		return nil
 	}
 
-	for i := 0; i < len(parts); i++ {
-		bk = bk.Bucket([]byte(parts[i]))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		bk = bk.Bucket([]byte(part))
 		if bk == nil {
 			return nil
 		}
@@ -206,7 +209,7 @@ func (fs *boltFs) Open(name string) (http.File, error) {
 			return nil, err
 		}
 		ibk := tx.Bucket(fs.bucket).Bucket([]byte(inodesKey)).Bucket(rf.stat.Inode)
-		rf.br = newBlockReader(ibk, rf.stat.BlockSize, rf.stat.Length)
+		rf.br = newBlockReader(ibk.Cursor(), rf.stat.BlockSize, rf.stat.Length)
 	}
 
 	return &rf, nil
