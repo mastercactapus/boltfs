@@ -10,17 +10,20 @@ import (
 )
 
 func TestBoltFS(t *testing.T) {
+	SetDefaultFailureMode(FailureHalts)
+	os.Remove("test.db")
+	defer os.Remove("test.db")
+	db, err := bolt.Open("test.db", 0644, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	fs, err := NewFileSystem(NewBoltDB(db), NewBucketPath([]byte("test")))
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	Convey("Should store and retrieve a single file", t, func() {
-		SetDefaultFailureMode(FailureHalts)
-		os.Remove("test.db")
-		defer os.Remove("test.db")
-		db, err := bolt.Open("test.db", 0644, nil)
-		So(err, ShouldBeNil)
-		defer db.Close()
-
-		fs, err := NewFileSystem(NewBoltDB(db), NewBucketPath([]byte("test")))
-		So(err, ShouldBeNil)
-
 		wc, err := fs.Create("foo")
 		So(err, ShouldBeNil)
 
@@ -37,5 +40,8 @@ func TestBoltFS(t *testing.T) {
 		So(err, ShouldBeNil)
 
 		So(string(data), ShouldEqual, "hello world!")
+	})
+	Convey("Should get stats for a file", t, func() {
+
 	})
 }

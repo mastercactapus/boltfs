@@ -12,7 +12,7 @@ type writableFile struct {
 	iPath, sPath BucketPath
 	length       int64
 	blockSize    int64
-	wf           io.WriteCloser
+	wc           io.WriteCloser
 }
 
 func newWritableFile(txFn func(func(tx Transaction) error) error, blockSize int64, inodePath, statPath BucketPath) *writableFile {
@@ -21,15 +21,15 @@ func newWritableFile(txFn func(func(tx Transaction) error) error, blockSize int6
 		sPath:     statPath,
 		iPath:     inodePath,
 		blockSize: blockSize,
-		wf:        NewChunkedWriter(&blockWriter{txFn: txFn, path: inodePath}, int(blockSize)),
+		wc:        NewChunkedWriter(&blockWriter{txFn: txFn, path: inodePath}, int(blockSize)),
 	}
 }
 
 func (f *writableFile) Write(p []byte) (int, error) {
-	if f.wf == nil {
+	if f.wc == nil {
 		return 0, fmt.Errorf("file is closed")
 	}
-	n, err := f.wf.Write(p)
+	n, err := f.wc.Write(p)
 	f.length += int64(n)
 	return n, err
 }
@@ -41,21 +41,22 @@ func (f *writableFile) wipeInode() error {
 }
 
 func (f *writableFile) Close() error {
-	if f.wf == nil {
+	if f.wc == nil {
 		return fmt.Errorf("file is closed")
 	}
-	err := f.wf.Close()
+	err := f.wc.Close()
 	if err != nil {
 		f.wipeInode()
 		return err
 	}
-	f.wf = nil
+	f.wc = nil
 
-	stat := fileStat{Dir: false, Length: f.length, BlockSize: f.blockSize, Inode: f.iPath, MTime: time.Now()}
+	name := string(f.sPath[len(f.sPath)-1])
+
+	stat := fileStat{Dir: false, Length: f.length, BlockSize: f.blockSize, Inode: f.iPath, MTime: time.Now(), Filename: name}
 	data, err := msgpack.Marshal(&stat)
 	if err != nil {
-		f.wipeInode()
-		return err
+		panic(err)
 	}
 
 	err = f.txFn(func(tx Transaction) error {

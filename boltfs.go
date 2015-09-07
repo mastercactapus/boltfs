@@ -32,7 +32,7 @@ type boltFs struct {
 }
 
 type fileStat struct {
-	Fullname  string
+	Filename  string
 	Dir       bool
 	Length    int64
 	BlockSize int64
@@ -168,7 +168,7 @@ func (fs *boltFs) Open(name string) (http.File, error) {
 	if data == nil {
 		rf.bk = bk.Bucket([]byte(file))
 		rf.stat.Dir = true
-		rf.stat.Fullname = name
+		rf.stat.Filename = file
 	} else {
 		err = msgpack.Unmarshal(data, &rf.stat)
 		if err != nil {
@@ -210,7 +210,7 @@ func (rf *readableFile) Readdir(limit int) ([]os.FileInfo, error) {
 	for k != nil {
 		name := string(k)
 		if v == nil {
-			inf = append(inf, fileStat{Dir: true, Fullname: rf.stat.Fullname + "/" + name})
+			inf = append(inf, fileStat{Dir: true, Filename: name})
 			continue
 		}
 		err = msgpack.Unmarshal(v, &stat)
@@ -237,7 +237,7 @@ func (s fileStat) ModTime() time.Time {
 	return s.MTime
 }
 func (s fileStat) Name() string {
-	return s.Fullname
+	return s.Filename
 }
 func (s fileStat) Size() int64 {
 	return s.Length
