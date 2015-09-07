@@ -2,35 +2,32 @@ package boltfs
 
 import (
 	"encoding/binary"
-	"github.com/boltdb/bolt"
 )
 
 type blockWriter struct {
-	fs       *boltFs
-	id       []byte
-	block    uint64
-	lastSize int
+	txFn    func(func(tx Transaction) error) error
+	path    BucketPath
+	block   uint64
+	written int64
 }
 
 func (i *blockWriter) Blocks() int {
-	return int(i.block - 1)
+	return int(i.block)
 }
-func (i *blockWriter) LastSize() int {
-	return i.lastSize
+func (i *blockWriter) Written() int64 {
+	return i.written
 }
 func (i *blockWriter) Write(p []byte) (int, error) {
 	blockID := make([]byte, 8)
 	binary.LittleEndian.PutUint64(blockID, i.block)
-	err := i.fs.db.Batch(func(tx *bolt.Tx) error {
-		bk := tx.Bucket(i.fs.bucket)
-		bk = bk.Bucket([]byte(inodesKey))
-		bk = bk.Bucket(i.id)
-		return bk.Put(blockID, p)
+	err := i.txFn(func(tx Transaction) error {
+		return i.path.BucketFrom(tx).Put(blockID, p)
 	})
 	if err != nil {
 		return 0, err
 	}
 	i.block++
-	i.lastSize = len(p)
-	return i.lastSize, nil
+	plen := len(p)
+	i.written += int64(plen)
+	return plen, nil
 }

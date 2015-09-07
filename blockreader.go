@@ -6,21 +6,15 @@ import (
 	"io"
 )
 
-type cursor interface {
-	First() ([]byte, []byte)
-	Next() ([]byte, []byte)
-	Seek([]byte) ([]byte, []byte)
-}
-
 type blockReader struct {
-	c         cursor
+	c         Cursor
 	blockSize int64
 	length    int64
 	pos       int64
 	cblock    []byte
 }
 
-func newBlockReader(c cursor, blockSize, length int64) *blockReader {
+func newBlockReader(c Cursor, blockSize, length int64) *blockReader {
 	_, fblock := c.First()
 	return &blockReader{c: c, blockSize: blockSize, length: length, cblock: fblock}
 }

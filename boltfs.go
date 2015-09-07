@@ -3,7 +3,6 @@ package boltfs
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/boltdb/bolt"
 	"gopkg.in/vmihailenco/msgpack.v2"
 	"io"
 	"net/http"
@@ -28,8 +27,8 @@ type FileSystem interface {
 }
 
 type boltFs struct {
-	db     *bolt.DB
-	bucket []byte
+	db   DB
+	path BucketPath
 }
 
 type fileStat struct {
@@ -37,21 +36,21 @@ type fileStat struct {
 	Dir       bool
 	Length    int64
 	BlockSize int64
-	Inode     []byte
+	Inode     BucketPath
 	MTime     time.Time
 }
 
 type readableFile struct {
 	pos  int64
-	tx   *bolt.Tx
-	bk   *bolt.Bucket
+	tx   Transaction
+	bk   Bucket
 	stat fileStat
 	br   *blockReader
 }
 
-func NewFileSystem(db *bolt.DB, bucket []byte) (FileSystem, error) {
-	err := db.Update(func(tx *bolt.Tx) error {
-		bk, err := tx.CreateBucketIfNotExists(bucket)
+func NewFileSystem(db DB, path BucketPath) (FileSystem, error) {
+	err := db.Update(func(tx Transaction) error {
+		bk, err := path.MkFrom(tx)
 		if err != nil {
 			return err
 		}
@@ -80,15 +79,18 @@ func NewFileSystem(db *bolt.DB, bucket []byte) (FileSystem, error) {
 		}
 		return nil
 	})
+
 	if err != nil {
 		return nil, err
 	}
-	return &boltFs{db: db, bucket: bucket}, nil
+
+	return &boltFs{db: db, path: path}, nil
 }
-func (fs *boltFs) nextInode() ([]byte, error) {
+func (fs *boltFs) nextInode() (BucketPath, error) {
+	var bpath BucketPath
 	val := make([]byte, 8)
-	err := fs.db.Update(func(tx *bolt.Tx) error {
-		bk := tx.Bucket(fs.bucket)
+	err := fs.db.Update(func(tx Transaction) error {
+		bk := fs.path.BucketFrom(tx)
 		b := bk.Get([]byte(inodeIndexKey))
 		var index uint64
 		if len(b) == 8 {
@@ -103,80 +105,44 @@ func (fs *boltFs) nextInode() ([]byte, error) {
 		if err != nil {
 			return err
 		}
-		_, err = tx.Bucket(fs.bucket).Bucket([]byte(inodesKey)).CreateBucket(val)
-		return err
+		bpath = fs.path.Join([]byte(inodesKey), val)
+		_, err = bpath.CreateFrom(tx)
+		if err != nil {
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return val, nil
+	return bpath, nil
 }
-func (fs *boltFs) getDirBucket(tx *bolt.Tx, name string) *bolt.Bucket {
-	parts := strings.Split(strings.TrimPrefix(name, "/"), "/")
-	bk := tx.Bucket(fs.bucket)
-	if bk == nil {
-		return nil
-	}
-	bk = bk.Bucket([]byte(fsKey))
-	if bk == nil {
-		return nil
-	}
 
+func (fs *boltFs) fsPath(name string) BucketPath {
+	parts := strings.Split(strings.TrimPrefix(name, "/"), "/")
+	p := make(BucketPath, len(fs.path), len(fs.path)+len(parts))
+	copy(p, fs.path)
 	for _, part := range parts {
 		if part == "" {
 			continue
 		}
-		bk = bk.Bucket([]byte(part))
-		if bk == nil {
-			return nil
-		}
+		p = append(p, []byte(part))
 	}
-	return bk
-}
-func (fs *boltFs) mkDirBucket(tx *bolt.Tx, name string) (*bolt.Bucket, error) {
-	parts := strings.Split(strings.TrimPrefix(name, "/"), "/")
-	bk, err := tx.CreateBucketIfNotExists(fs.bucket)
-	if err != nil {
-		return nil, err
-	}
-	bk, err = bk.CreateBucketIfNotExists([]byte(fsKey))
-	if err != nil {
-		return nil, err
-	}
-	for i := 0; i < len(parts); i++ {
-		if parts[i] == "" {
-			continue
-		}
-		bk, err = bk.CreateBucketIfNotExists([]byte(parts[i]))
-		if err != nil {
-			return nil, err
-		}
-	}
-	return bk, nil
+	return p
 }
 
 func (fs *boltFs) Create(name string) (io.WriteCloser, error) {
-	dir, file := path.Split(name)
+	_, file := path.Split(name)
 	if file == "" {
 		return nil, fmt.Errorf("open %s: is a directory", name)
 	}
-
-	inode, err := fs.nextInode()
+	statPath := fs.fsPath(name)
+	inodePath, err := fs.nextInode()
 	if err != nil {
 		return nil, err
 	}
 
-	bw := &blockWriter{fs: fs, id: inode}
-	cw := NewChunkedWriter(bw, int(blockSize))
-
-	return &writableFile{
-		inode: inode,
-		bw:    bw,
-		cw:    cw,
-		dir:   dir,
-		file:  file,
-		fs:    fs,
-	}, nil
+	return newWritableFile(fs.db.Batch, blockSize, inodePath, statPath), nil
 }
 
 func (fs *boltFs) Open(name string) (http.File, error) {
@@ -185,7 +151,8 @@ func (fs *boltFs) Open(name string) (http.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	bk := fs.getDirBucket(tx, dir)
+	dirPath := fs.fsPath(dir)
+	bk := dirPath.BucketFrom(tx)
 	if bk == nil {
 		tx.Commit()
 		return nil, fmt.Errorf("file not found")
@@ -208,7 +175,7 @@ func (fs *boltFs) Open(name string) (http.File, error) {
 			tx.Commit()
 			return nil, err
 		}
-		ibk := tx.Bucket(fs.bucket).Bucket([]byte(inodesKey)).Bucket(rf.stat.Inode)
+		ibk := rf.stat.Inode.BucketFrom(tx)
 		rf.br = newBlockReader(ibk.Cursor(), rf.stat.BlockSize, rf.stat.Length)
 	}
 
@@ -234,7 +201,7 @@ func (rf *readableFile) Readdir(limit int) ([]os.FileInfo, error) {
 	if rf.bk == nil {
 		return nil, fmt.Errorf("is a file")
 	}
-	inf := make([]os.FileInfo, 0, rf.bk.Stats().KeyN)
+	inf := make([]os.FileInfo, 0, 100)
 	c := rf.bk.Cursor()
 	k, v := c.First()
 	i := 1

@@ -16,7 +16,7 @@ func TestBoltFS(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	fs, err := NewFileSystem(db, []byte("test"))
+	fs, err := NewFileSystem(NewBoltDB(db), NewBucketPath([]byte("test")))
 	if err != nil {
 		t.Fatal(err)
 	}
