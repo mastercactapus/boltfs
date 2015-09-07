@@ -1,6 +1,7 @@
 package boltfs
 
 import (
+	"fmt"
 	"io"
 )
 
@@ -15,15 +16,22 @@ func NewChunkedWriter(w io.Writer, chunkSize int) *ChunkedWriter {
 	return &ChunkedWriter{w: w, size: chunkSize, buf: make([]byte, chunkSize)}
 }
 
-func (cw *ChunkedWriter) Flush() error {
-	if cw.pos == 0 {
-		return nil
+func (cw *ChunkedWriter) Close() error {
+	if cw.w == nil {
+		return fmt.Errorf("closed")
 	}
-	_, err := cw.w.Write(cw.buf[:cw.pos])
+	var err error
+	if cw.pos > 0 {
+		_, err = cw.w.Write(cw.buf[:cw.pos])
+	}
+	cw.w = nil
 	return err
 }
 
 func (cw *ChunkedWriter) Write(p []byte) (int, error) {
+	if cw.w == nil {
+		return 0, fmt.Errorf("closed")
+	}
 	plen := len(p)
 	total := plen + cw.pos
 	// if smaller, copy and return
@@ -41,7 +49,7 @@ func (cw *ChunkedWriter) Write(p []byte) (int, error) {
 		copy(cw.buf[cw.pos:], p)
 		_, err = cw.w.Write(cw.buf)
 		if err != nil {
-			return cw.size - cw.pos, err
+			return 0, err
 		}
 		p = p[cw.size-cw.pos:]
 		read = cw.size - cw.pos

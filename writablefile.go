@@ -7,17 +7,12 @@ import (
 	"time"
 )
 
-type WriteFlusher interface {
-	io.Writer
-	Flush() error
-}
-
 type writableFile struct {
 	txFn         func(func(tx Transaction) error) error
 	iPath, sPath BucketPath
 	length       int64
 	blockSize    int64
-	wf           WriteFlusher
+	wf           io.WriteCloser
 }
 
 func newWritableFile(txFn func(func(tx Transaction) error) error, blockSize int64, inodePath, statPath BucketPath) *writableFile {
@@ -49,7 +44,7 @@ func (f *writableFile) Close() error {
 	if f.wf == nil {
 		return fmt.Errorf("file is closed")
 	}
-	err := f.wf.Flush()
+	err := f.wf.Close()
 	if err != nil {
 		f.wipeInode()
 		return err
