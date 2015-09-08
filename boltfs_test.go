@@ -41,7 +41,36 @@ func TestBoltFS(t *testing.T) {
 
 		So(string(data), ShouldEqual, "hello world!")
 	})
-	Convey("Should get stats for a file", t, func() {
 
+	err = db.Update(func(tx *bolt.Tx) error {
+		bk, err := tx.CreateBucket([]byte("badVersion"))
+		if err != nil {
+			return err
+		}
+		bkb, err := tx.CreateBucket([]byte("corruptVersion"))
+		if err != nil {
+			return err
+		}
+		err = bkb.Put([]byte(versionKey), []byte{0, 0})
+		if err != nil {
+			return err
+		}
+
+		return bk.Put([]byte(versionKey), []byte{0, 0, 0, 0, 0, 0, 0, 0})
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	Convey("Should refuse to open on version mismatch", t, func() {
+		fs, err := NewFileSystem(NewBoltDB(db), NewBucketPath([]byte("badVersion")))
+		So(fs, ShouldBeNil)
+		So(err, ShouldNotBeNil)
+	})
+	Convey("Should not panic on corrupt version", t, func() {
+		fs, err := NewFileSystem(NewBoltDB(db), NewBucketPath([]byte("corruptVersion")))
+		So(fs, ShouldBeNil)
+		So(err, ShouldNotBeNil)
+	})
+
 }

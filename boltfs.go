@@ -55,11 +55,13 @@ func NewFileSystem(db DB, path BucketPath) (FileSystem, error) {
 			return err
 		}
 		data := bk.Get([]byte(versionKey))
-		if len(data) > 0 {
+		if len(data) == 8 {
 			v := binary.LittleEndian.Uint64(data)
 			if v != Version {
 				return fmt.Errorf("existing fs version mismatch %d!=%d", v, Version)
 			}
+		} else if len(data) > 0 {
+			return fmt.Errorf("could not read existing fs version")
 		} else {
 			data = make([]byte, 8)
 			binary.LittleEndian.PutUint64(data, uint64(Version))
