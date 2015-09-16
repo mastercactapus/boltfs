@@ -73,15 +73,25 @@ func (b *boltDB) Batch(fn func(tx Transaction) error) error {
 
 func (tx *boltTx) CreateBucketIfNotExists(key []byte) (Bucket, error) {
 	bk, err := tx.Tx.CreateBucketIfNotExists(key)
+	if bk == nil {
+		return nil, err
+	}
 	return &boltBk{bk}, err
 }
 func (tx *boltTx) CreateBucket(key []byte) (Bucket, error) {
 	bk, err := tx.Tx.CreateBucket(key)
+	if bk == nil {
+		return nil, err
+	}
 	return &boltBk{bk}, err
 }
 
 func (tx *boltTx) Bucket(key []byte) Bucket {
-	return &boltBk{tx.Tx.Bucket(key)}
+	bk := tx.Tx.Bucket(key)
+	if bk == nil {
+		return nil
+	}
+	return &boltBk{bk}
 }
 func (tx *boltTx) Cursor() Cursor {
 	return tx.Tx.Cursor()
@@ -89,17 +99,27 @@ func (tx *boltTx) Cursor() Cursor {
 
 func (bk *boltBk) CreateBucketIfNotExists(key []byte) (Bucket, error) {
 	b, err := bk.bk.CreateBucketIfNotExists(key)
+	if b == nil {
+		return nil, err
+	}
 	return &boltBk{b}, err
 }
 func (bk *boltBk) CreateBucket(key []byte) (Bucket, error) {
 	b, err := bk.bk.CreateBucket(key)
+	if b == nil {
+		return nil, err
+	}
 	return &boltBk{b}, err
 }
 func (bk *boltBk) DeleteBucket(key []byte) error {
 	return bk.bk.DeleteBucket(key)
 }
 func (bk *boltBk) Bucket(key []byte) Bucket {
-	return &boltBk{bk.bk.Bucket(key)}
+	b := bk.bk.Bucket(key)
+	if b == nil {
+		return nil
+	}
+	return &boltBk{b}
 }
 func (bk *boltBk) Cursor() Cursor {
 	return bk.bk.Cursor()

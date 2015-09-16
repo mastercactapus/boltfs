@@ -45,6 +45,7 @@ type readableFile struct {
 	tx   Transaction
 	bk   Bucket
 	stat fileStat
+	c    Cursor
 	br   *blockReader
 }
 
@@ -98,12 +99,11 @@ func (fs *boltFs) nextInode() (BucketPath, error) {
 		if len(b) == 8 {
 			copy(val, b)
 			index = binary.LittleEndian.Uint64(b)
-		} else {
-			b = make([]byte, 8)
 		}
 		index++
-		binary.LittleEndian.PutUint64(b, index)
-		err := bk.Put([]byte(inodeIndexKey), b)
+		buf := make([]byte, 8)
+		binary.LittleEndian.PutUint64(buf, index)
+		err := bk.Put([]byte(inodeIndexKey), buf)
 		if err != nil {
 			return err
 		}
@@ -122,8 +122,9 @@ func (fs *boltFs) nextInode() (BucketPath, error) {
 
 func (fs *boltFs) fsPath(name string) BucketPath {
 	parts := strings.Split(strings.TrimPrefix(name, "/"), "/")
-	p := make(BucketPath, len(fs.path), len(fs.path)+len(parts))
+	p := make(BucketPath, len(fs.path), len(fs.path)+len(parts)+1)
 	copy(p, fs.path)
+	p = append(p, []byte(fsKey))
 	for _, part := range parts {
 		if part == "" {
 			continue
@@ -148,7 +149,18 @@ func (fs *boltFs) Create(name string) (io.WriteCloser, error) {
 }
 
 func (fs *boltFs) Open(name string) (http.File, error) {
-	dir, file := path.Split(name)
+	fmt.Println("Open", name)
+	var dir, file string
+	if name == "/" {
+		dir = ""
+		file = ""
+	} else if strings.HasSuffix(name, "/") {
+		dir = strings.TrimSuffix(name, "/")
+		file = ""
+	} else {
+		dir, file = path.Split(name)
+	}
+
 	tx, err := fs.db.Begin(false)
 	if err != nil {
 		return nil, err
@@ -161,25 +173,35 @@ func (fs *boltFs) Open(name string) (http.File, error) {
 	}
 
 	var rf readableFile
+	rf.tx = tx
+	if file == "" {
+		rf.bk = bk
+		rf.stat.Dir = true
+		rf.stat.Filename = path.Base(dir)
+		return &rf, nil
+	}
+
+	dbk := bk.Bucket([]byte(file))
+	if dbk != nil {
+		rf.bk = dbk
+		rf.stat.Dir = true
+		rf.stat.Filename = file
+		return &rf, nil
+	}
+
 	data := bk.Get([]byte(file))
-	if len(data) == 0 {
+	if len(data) == 0 || data == nil {
 		tx.Commit()
 		return nil, fmt.Errorf("file not found")
 	}
-	//nil means bucket, 0-length means not found
-	if data == nil {
-		rf.bk = bk.Bucket([]byte(file))
-		rf.stat.Dir = true
-		rf.stat.Filename = file
-	} else {
-		err = msgpack.Unmarshal(data, &rf.stat)
-		if err != nil {
-			tx.Commit()
-			return nil, err
-		}
-		ibk := rf.stat.Inode.BucketFrom(tx)
-		rf.br = newBlockReader(ibk.Cursor(), rf.stat.BlockSize, rf.stat.Length)
+
+	err = msgpack.Unmarshal(data, &rf.stat)
+	if err != nil {
+		tx.Commit()
+		return nil, err
 	}
+	ibk := rf.stat.Inode.BucketFrom(tx)
+	rf.br = newBlockReader(ibk.Cursor(), rf.stat.BlockSize, rf.stat.Length)
 
 	return &rf, nil
 }
@@ -203,13 +225,25 @@ func (rf *readableFile) Readdir(limit int) ([]os.FileInfo, error) {
 	if rf.bk == nil {
 		return nil, fmt.Errorf("is a file")
 	}
-	inf := make([]os.FileInfo, 0, 100)
-	c := rf.bk.Cursor()
-	k, v := c.First()
-	i := 1
+	if limit == 0 {
+		limit = 1
+	}
+	initialSize := limit
+	if initialSize < 1 {
+		initialSize = 250
+	}
+	inf := make([]os.FileInfo, 0, initialSize)
+	var k, v []byte
+	if rf.c == nil {
+		rf.c = rf.bk.Cursor()
+		k, v = rf.c.First()
+	} else {
+		k, v = rf.c.Next()
+	}
+
 	var err error
 	var stat fileStat
-	for k != nil {
+	for ; k != nil; k, v = rf.c.Next() {
 		name := string(k)
 		if v == nil {
 			inf = append(inf, fileStat{Dir: true, Filename: name})
@@ -220,10 +254,11 @@ func (rf *readableFile) Readdir(limit int) ([]os.FileInfo, error) {
 			return nil, err
 		}
 		inf = append(inf, stat)
-		if i == limit {
+		if len(inf) == limit {
 			break
 		}
 	}
+
 	return inf, nil
 }
 func (rf *readableFile) Close() error {
