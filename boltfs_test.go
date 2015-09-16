@@ -98,6 +98,7 @@ func TestBoltFS(t *testing.T) {
 			So(inf[1].IsDir(), ShouldBeFalse)
 			So(inf[1].Size(), ShouldEqual, 5)
 			So(inf[1].Name(), ShouldEqual, "foo")
+
 		})
 		Convey("Should list a sub directory", func() {
 			wc, _ := fs.Create("foo")
@@ -118,6 +119,18 @@ func TestBoltFS(t *testing.T) {
 			So(inf[0].IsDir(), ShouldBeFalse)
 			So(inf[0].Size(), ShouldEqual, 5)
 			So(inf[0].Name(), ShouldEqual, "baz")
+
+			f, err = fs.Open("/bar")
+			So(f, ShouldNotBeNil)
+			So(err, ShouldBeNil)
+			inf, err = f.Readdir(-1)
+			So(err, ShouldBeNil)
+			f.Close()
+			So(len(inf), ShouldEqual, 1)
+			So(inf[0].IsDir(), ShouldBeFalse)
+			So(inf[0].Size(), ShouldEqual, 5)
+			So(inf[0].Name(), ShouldEqual, "baz")
+
 		})
 
 	})

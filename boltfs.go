@@ -149,7 +149,6 @@ func (fs *boltFs) Create(name string) (io.WriteCloser, error) {
 }
 
 func (fs *boltFs) Open(name string) (http.File, error) {
-	fmt.Println("Open", name)
 	var dir, file string
 	if name == "/" {
 		dir = ""
